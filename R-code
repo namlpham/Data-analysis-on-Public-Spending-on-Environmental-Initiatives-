@@ -1,0 +1,766 @@
+# THIS DOCUMENT CONTAIN THE CLEANED UP CODE FOR THE RESEARCH PROJECT ON PUBLIC SPENDING ON ENVIRONMENT 
+# SPRING 2023
+# NAM PHAM
+
+#-----------------------PACKAGES EMPLOYED FOR THE ANALYSIS------------------------
+library(tidyverse)
+library(plyr)
+library(psych)
+library(gmodels)
+library(corpcor)
+library(polycor)
+library(corrplot)
+library(ggplot2)
+
+library(scales)
+library(pROC)
+library(stargazer)
+library(car)
+library(sjmisc)
+library(sjPlot)
+library(ResourceSelection)
+library(lmtest)
+
+library(rattle)
+library(Rcpp)
+library(randomForest)
+library(e1071)
+library(caret)
+library(pROC)
+library(rpart)
+library(rpart.plot)
+library(stats)
+library(ResourceSelection)
+
+options(scipen=999)
+
+
+
+#-------------------------FUNCTIONS EMPLOYED FOR THE ANALYSIS------------------------------
+
+log.pseudo.r2 <- function(LogModel) {
+  dev <- LogModel$deviance
+  nullDev <- LogModel$null.deviance
+  modelN <- length(LogModel$fitted.values)
+  R.l <- 1 - dev/nullDev
+  R.cs <- 1 - exp(-(nullDev - dev)/modelN)
+  R.n <- R.cs/(1 - (exp(-(nullDev/modelN))))
+  cat("Pseudo R^2 for Logistic Regression\n")
+  cat("Hosmer and Lemeshow R^2 ", round(R.l, 3), "\n")
+  cat("Cox and Snell R^2       ", round(R.cs, 3), "\n")
+  cat("Nagelkerke R^2          ", round(R.n, 3),     "\n")
+}
+
+modelsig <- function(LogModel) {
+  modelChi <- LogModel$null.deviance - LogModel$deviance
+  chidf <- LogModel$df.null - LogModel$df.residual
+  chisq.prob <- 1 - pchisq(modelChi, chidf)
+  cat("Significance: ", round(chisq.prob, 5), "\n")
+}
+
+
+
+
+#-------------------------IMPORTING AND CREATING DATASET WITH VARIABLES OF INTEREST---------------------------
+# Import the GSS dataset for 2016. Note that this data was filtered and pre-processsed
+gss <- read.csv("GSS.csv")
+
+# Priliminary check on the dataset. This shows a frequency table on complete cases
+complete.cases(gss) %>% 
+  table()
+
+# Which 2 cases are missing in the dataset? 
+incomplete_cases <- which(!complete.cases(gss))
+gss[incomplete_cases, ]
+
+# Creating dataset of variables of interest for analysis 
+gss_environ <- gss[1:2867,] %>%
+  select(
+    Improving_protecting_environment,
+    Parks_and_recreation,
+    Mass_transportation,
+    Developing_alternative_energy_sources, 
+    The_environment__version_y,
+    Number_of_children,
+    Ideal_number_children,
+    Confid_banks_financial,
+    Confidence_major_companies,
+    Confidence_in_education,
+    Confid_exec_branch_fed_govt,
+    Confidence_press,
+    Confidence_medicine,
+    Confidence_television,
+    Confidence_in_congress,
+    Confidence_scientific_community,
+    Confid_US_supreme_court,
+    Can_people_be_trusted,
+    Age_of_respondent,
+    Respondents_sex,
+    Race_of_respondent,
+    Highest_year_of_school_completed,
+    Rs_highest_degree,
+    Total_family_income,
+    Respondents_income,
+    Subjective_class_identification,
+    Rs_ranking_social_position,
+    Occupationcode2010,
+    Industrycode2007,
+    Political_party_affiliation,
+    Think_of_self_as_liberal_or_conservative,
+    Region_of_residence_age_16,
+    Region_of_interview,
+    Marital_status
+  ) %>% 
+  rename(c( 
+    "Improving_protecting_environment"="ipenviro", 
+    "Parks_and_recreation" = "parkrec", 
+    "Mass_transportation" = "masstrans",
+    "Developing_alternative_energy_sources" = "alterenerg",
+    "The_environment__version_y" = "enviroy",
+    "Number_of_children" = "numchild",
+    "Ideal_number_children" = "idealnchild",
+    "Confid_banks_financial" = "conbank",
+    "Confidence_major_companies" = "concomp", 
+    "Confidence_in_education" = "coneduc", 
+    "Confid_exec_branch_fed_govt" = "conexecfed",
+    "Confidence_press" = "conpress",
+    "Confidence_medicine" = "conmed",
+    "Confidence_television" = "contv", 
+    "Confidence_in_congress"= "conlegis",
+    "Confidence_scientific_community" = "consciencom", 
+    "Confid_US_supreme_court" = "conuscourt",
+    "Can_people_be_trusted" = "contrust",
+    "Age_of_respondent" = "age",
+    "Respondents_sex" = "sex",
+    "Race_of_respondent" = "race",
+    "Highest_year_of_school_completed" = "higheduc",
+    "Rs_highest_degree" = "highdegree",
+    "Total_family_income" = "famincome", 
+    "Respondents_income" = "income",
+    "Subjective_class_identification" = "classsubid",
+    "Rs_ranking_social_position" = "socialpos",
+    "Occupationcode2010" = "job",
+    "Industrycode2007" = "industry",
+    "Political_party_affiliation" = "poliparty",
+    "Think_of_self_as_liberal_or_conservative" = "libconserv",
+    "Region_of_residence_age_16"= "region16",
+    "Region_of_interview" = "regioninterv", 
+    "Marital_status" = "marital"
+  ))
+
+complete.cases(gss_environ) %>% 
+  table()
+
+
+
+
+
+#------------------------Evaluating DATASET WITH VARIABLES OF INTEREST------------------
+# Evaluate types of data 
+str(gss_environ)
+sapply(gss_environ, class)
+
+# Check for type of data 
+table(gss_environ$ipenviro)
+table(gss_environ$age) # should be numeric
+table(gss_environ$parkrec)
+table(gss_environ$masstrans)
+table(gss_environ$alterenerg)
+table(gss_environ$enviroy)
+table(gss_environ$numchild) #numeric 
+table(gss_environ$idealnchild) #needs review
+table(gss_environ$conbank)
+table(gss_environ$concomp)
+table(gss_environ$coneduc)
+table(gss_environ$conexecfed)
+table(gss_environ$conpress)
+table(gss_environ$conmed)
+table(gss_environ$contv)
+table(gss_environ$conlegis)
+table(gss_environ$consciencom)
+table(gss_environ$conuscourt)
+table(gss_environ$contrust)
+table(gss_environ$sex)
+table(gss_environ$race)
+table(gss_environ$higheduc) #numeric 
+table(gss_environ$highdegree)
+table(gss_environ$famincome) #numeric
+table(gss_environ$income) #numeric
+table(gss_environ$classsubid)
+table(gss_environ$socialpos)
+table(gss_environ$job)
+table(gss_environ$industry)
+table(gss_environ$poliparty)
+table(gss_environ$libconserv)
+table(gss_environ$region16)
+table(gss_environ$regioninterv)
+table(gss_environ$marital)
+
+
+
+
+
+# DATA PREP---------
+
+# ---------- CREATING THE DEPENDENT VARIABLE: AN INDEX FOR LIKELIHOOD TO FINANCIALLY SUPPORT ENVIRONMENTAL INITIATIVES --------------------------------------------
+# Transforming the 4 indicators of likelihood to support spending on environmental initiatives 
+# These variables include: Improving and protecting the environ, Developing alternative energy sources, Mass transportation, and Parks and Recreation. 
+gss_environ$ipenviro[gss_environ$ipenviro == "Not applicable" | gss_environ$ipenviro == "No answer" | gss_environ$ipenviro == "Don't know"] <- NA
+gss_environ$ipenviro.i <- ifelse(gss_environ$ipenviro == "Too little", 2, ifelse(gss_environ$ipenviro == "About right", 1, 0))
+
+gss_environ$alterenerg[gss_environ$alterenerg == "No answer" | gss_environ$alterenerg == "Don't know"] <- NA
+gss_environ$alterenerg.i <- ifelse(gss_environ$alterenerg == "Too little", 2, ifelse(gss_environ$alterenerg == "About right", 1, 0))
+
+gss_environ$parkrec[gss_environ$parkrec == "No answer" | gss_environ$parkrec == "Don't know"] <- NA
+gss_environ$parkrec.i <- ifelse(gss_environ$parkrec == "Too little", 2, ifelse(gss_environ$parkrec == "About right", 1, 0))
+
+gss_environ$masstrans[gss_environ$masstrans == "No answer" | gss_environ$masstrans == "Don't know"] <- NA
+gss_environ$masstrans.i <- ifelse(gss_environ$masstrans == "Too little", 2, ifelse(gss_environ$masstrans == "About right", 1, 0))
+
+gss_environ$enviroy[gss_environ$enviroy == "Not applicable" | gss_environ$enviroy == "No answer" | gss_environ$enviroy == "Don't know"] <- NA
+gss_environ$enviroy.i <- ifelse(gss_environ$enviroy == "Too little", 2, ifelse(gss_environ$enviroy == "About right", 1, 0))
+
+# Calculating the index 
+gss_environ$total_score <- rowSums(gss_environ[, 35:38])
+gss_environ$normal_score <- gss_environ$total_score / 8
+
+gss_environ$normal_score <- as.numeric(gss_environ$normal_score)
+
+table(gss_environ$normal_score)
+mean(gss_environ$normal_score,na.rm = TRUE)
+
+gss_environ$likeli_env <- ifelse(gss_environ$normal_score > 0.7, 1, 0)
+table(gss_environ$likeli_env)   
+
+
+
+
+
+
+
+
+
+
+
+
+#--------------------- TRANSFORMATIONS NUMERIC INDEPENDENT VARIBALES --------------------------------------------------------------------
+
+# For AGE 
+gss_environ$o_age <- gss_environ$age 
+gss_environ$age[gss_environ$age == "89 or older"] <- "89"
+gss_environ$age <- as.numeric(gss_environ$age)
+gss_environ$age[is.na(gss_environ$age)] <- round(mean(gss_environ$age, na.rm = TRUE))
+
+# For Number of children
+gss_environ$o_numchild <- gss_environ$numchild
+gss_environ$numchild[gss_environ$numchild == "Eight or more"] <- "8"
+gss_environ$numchild <- as.numeric(gss_environ$numchild)
+gss_environ$numchild[is.na(gss_environ$numchild)] <- round(mean(gss_environ$numchild, na.rm = TRUE))
+
+# For Ideal Number of children
+gss_environ$o_idealchild <- gss_environ$idealnchild
+gss_environ$idealnchild[gss_environ$idealnchild == "SEVEN+"] <- "7"
+gss_environ$idealnchild[gss_environ$idealchild == "AS MANY AS WANT"] <- "15"
+gss_environ$idealnchild <- as.numeric(gss_environ$idealnchild)
+gss_environ$idealnchild[is.na(gss_environ$idealnchild)] <- round(mean(gss_environ$idealnchild, na.rm = TRUE))
+
+# For highest year of school completed 
+gss_environ$o_higheduc <- gss_environ$higheduc
+gss_environ$higheduc <- as.numeric(gss_environ$higheduc)
+gss_environ$higheduc[is.na(gss_environ$higheduc)] <- 0
+
+# For family income
+gss_environ$o_famincome <- gss_environ$famincome
+gss_environ$famincome[gss_environ$famincome == "Lt $1000"] <- 999
+gss_environ$famincome[gss_environ$famincome == "$1000 to 2999"] <- 1500
+gss_environ$famincome[gss_environ$famincome == "$3000 to 3999"] <- 3500
+gss_environ$famincome[gss_environ$famincome == "$4000 to 4999"] <- 4500
+gss_environ$famincome[gss_environ$famincome == "$5000 to 5999"] <- 5500
+gss_environ$famincome[gss_environ$famincome == "$6000 to 6999"] <- 6500
+gss_environ$famincome[gss_environ$famincome == "$7000 to 7999"] <- 7500
+gss_environ$famincome[gss_environ$famincome == "$8000 to 9999"] <- 8500
+gss_environ$famincome[gss_environ$famincome == "$10000 - 14999"] <- 12500
+gss_environ$famincome[gss_environ$famincome == "$15000 - 19999"] <- 17500
+gss_environ$famincome[gss_environ$famincome == "$20000 - 24999"] <- 22500
+gss_environ$famincome[gss_environ$famincome == "$25000 or more"] <- 30000
+gss_environ$famincome <- as.numeric(gss_environ$famincome)
+
+# For Income 
+gss_environ$o_income <- gss_environ$income
+gss_environ$income[gss_environ$income == "Lt $1000"] <- 999
+gss_environ$income[gss_environ$income == "$1000 to 2999"] <- 1500
+gss_environ$income[gss_environ$income == "$3000 to 3999"] <- 3500
+gss_environ$income[gss_environ$income == "$4000 to 4999"] <- 4500
+gss_environ$income[gss_environ$income == "$5000 to 5999"] <- 5500
+gss_environ$income[gss_environ$income == "$6000 to 6999"] <- 6500
+gss_environ$income[gss_environ$income == "$7000 to 7999"] <- 7500
+gss_environ$income[gss_environ$income == "$8000 to 9999"] <- 8500
+gss_environ$income[gss_environ$income == "$10000 - 14999"] <- 12500
+gss_environ$income[gss_environ$income == "$15000 - 19999"] <- 17500
+gss_environ$income[gss_environ$income == "$20000 - 24999"] <- 22500
+gss_environ$income[gss_environ$income == "$25000 or more"] <- 30000
+gss_environ$income <- as.numeric(gss_environ$income)
+
+
+
+#--------------------- DUMMY CODING - TRANSFORMATIONS BINARY INDEPENDENT VARIBALES -------------------------------------
+
+# For SEX
+gss_environ$o_sex <- gss_environ$sex
+gss_environ$sex <- ifelse(gss_environ$sex == "Female", 1, 0)
+table(gss_environ$sex)
+gss_environ$sex <- as.numeric(gss_environ$sex)
+
+# For RACE
+gss_environ$race_poc <- ifelse(gss_environ$race == "Black" | gss_environ$race == "Other" , 1, 0)
+table(gss_environ$race_poc)
+gss_environ$race_poc <- as.numeric(gss_environ$race_poc)
+
+# For Highest degree- EDUCATION
+gss_environ$highereduc <- ifelse(gss_environ$highdegree == "Bachelor" | gss_environ$highdegree == "Graduate" | gss_environ$highdegree == "Junior college" , 1, 0)
+table(gss_environ$highereduc)
+gss_environ$highereduc <- as.numeric(gss_environ$highereduc)
+
+# For Subjective class identification- CLASS
+gss_environ$higherclass <- gss_environ$classsubid
+gss_environ$higherclass[gss_environ$higherclass == "Don't know"] <- NA
+gss_environ$higherclass <- ifelse(gss_environ$higherclass == "Upper class" | gss_environ$higherclass == "Middle class", 1, 0)
+table(gss_environ$higherclass)
+gss_environ$higherclass <- as.numeric(gss_environ$higherclass)
+
+# For POLITICAL Party affiliation 
+gss_environ$votedem <- ifelse(gss_environ$poliparty == "Strong democrat" | gss_environ$poliparty == "Not str democrat" | gss_environ$poliparty == "Ind,near dem", 1, 0)
+table(gss_environ$votedem)
+gss_environ$votedem  <- as.numeric(gss_environ$votedem)
+
+# For Political Ideology- LIB vs. CONSERV
+gss_environ$libideal <- ifelse(gss_environ$libconserv == "Extremely liberal" | gss_environ$libconserv == "Liberal" | gss_environ$libconserv == "Slightly liberal", 1, 0)
+table(gss_environ$libideal)
+gss_environ$libideal <- as.numeric(gss_environ$libideal)
+
+# For Marital Status
+gss_environ$c_partnered <- ifelse(gss_environ$marital == "Married", 1, 0)
+table(gss_environ$c_partnered)
+gss_environ$c_partnered <- as.numeric(gss_environ$c_partnered)
+
+
+
+# ---------- Prep data for FACTOR Analysis to reduce dimension on confidence level in institutions ------------------------------------------------------------------------------------------
+# For Confidence in Bank and Fanancial Institutions- transforming to ordinal 
+gss_environ$conbank.f <- gss_environ$conbank
+gss_environ$conbank.f[gss_environ$conbank.f == "Not applicable" | gss_environ$conbank.f == "No answer" | gss_environ$conbank.f == "Don't know"] <- NA
+table(gss_environ$conbank.f)
+gss_environ$conbank.f <- factor(gss_environ$conbank.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$conbank.f <- as.numeric(gss_environ$conbank.f)
+
+
+# For Confidence in companies and business- transforming to ordinal 
+gss_environ$concomp.f <- gss_environ$concomp
+gss_environ$concomp.f[gss_environ$concomp.f == "Not applicable" | gss_environ$concomp.f == "No answer" | gss_environ$concomp.f == "Don't know"] <- NA
+table(gss_environ$concomp.f)
+gss_environ$concomp.f <- factor(gss_environ$concomp.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$concomp.f <- as.numeric(gss_environ$concomp.f)
+
+
+# For Confidence in Education - transforming to ordinal 
+gss_environ$coneduc.f <- gss_environ$coneduc
+gss_environ$coneduc.f[gss_environ$coneduc.f == "Not applicable" | gss_environ$coneduc.f == "No answer" | gss_environ$coneduc.f == "Don't know"] <- NA
+table(gss_environ$coneduc.f)
+gss_environ$coneduc.f <- factor(gss_environ$coneduc.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$coneduc.f <- as.numeric(gss_environ$coneduc.f)
+
+# For Confidence in executive branch of the Federal Gov - transforming to ordinal 
+gss_environ$conexecfed.f <- gss_environ$conexecfed
+gss_environ$conexecfed.f[gss_environ$conexecfed.f == "Not applicable" | gss_environ$conexecfed.f == "No answer" | gss_environ$conexecfed.f == "Don't know"] <- NA
+table(gss_environ$conexecfed.f)
+gss_environ$conexecfed.f <- factor(gss_environ$conexecfed.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$conexecfed.f <- as.numeric(gss_environ$conexecfed.f)
+
+# For Confidence in Press - transforming to ordinal 
+gss_environ$conpress.f <- gss_environ$conpress
+gss_environ$conpress.f[gss_environ$conpress.f == "Not applicable" | gss_environ$conpress.f == "No answer" | gss_environ$conpress.f == "Don't know"] <- NA
+table(gss_environ$conpress.f)
+gss_environ$conpress.f <- factor(gss_environ$conpress.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$conpress.f <- as.numeric(gss_environ$conpress.f)
+
+# For Confidence in Medicine- transforming to ordinal 
+gss_environ$conmed.f <- gss_environ$conmed
+gss_environ$conmed.f[gss_environ$conmed.f == "Not applicable" | gss_environ$conmed.f == "No answer" | gss_environ$conmed.f == "Don't know"] <- NA
+table(gss_environ$conmed.f)
+gss_environ$conmed.f <- factor(gss_environ$conmed.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$conmed.f <- as.numeric(gss_environ$conmed.f)
+
+# For Confidence in TV - transforming to ordinal 
+gss_environ$contv.f <- gss_environ$contv
+gss_environ$contv.f[gss_environ$contv.f == "Not applicable" | gss_environ$contv.f == "No answer" | gss_environ$contv.f == "Don't know"] <- NA
+table(gss_environ$contv.f)
+gss_environ$contv.f <- factor(gss_environ$contv.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$contv.f <- as.numeric(gss_environ$contv.f)
+
+# For Confidence in Congress- transforming to ordinal 
+gss_environ$conlegis.f <- gss_environ$conlegis
+gss_environ$conlegis.f[gss_environ$conlegis.f == "Not applicable" | gss_environ$conlegis.f == "No answer" | gss_environ$conlegis.f == "Don't know"] <- NA
+table(gss_environ$conlegis.f)
+gss_environ$conlegis.f <- factor(gss_environ$conlegis.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$conlegis.f <- as.numeric(gss_environ$conlegis.f)
+
+# For Confidence in Science community- transforming to ordinal 
+gss_environ$consciencom.f <- gss_environ$consciencom
+gss_environ$consciencom.f[gss_environ$consciencom.f == "Not applicable" | gss_environ$consciencom.f == "No answer" | gss_environ$consciencom.f == "Don't know"] <- NA
+table(gss_environ$consciencom.f)
+gss_environ$consciencom.f <- factor(gss_environ$consciencom.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$consciencom.f <- as.numeric(gss_environ$consciencom.f)
+
+# For Confidence in US supreme court - transforming to ordinal 
+gss_environ$conuscourt.f <- gss_environ$conuscourt
+gss_environ$conuscourt.f[gss_environ$conuscourt.f == "Not applicable" | gss_environ$conuscourt.f == "No answer" | gss_environ$conuscourt.f == "Don't know"] <- NA
+table(gss_environ$conuscourt.f)
+gss_environ$conuscourt.f <- factor(gss_environ$conuscourt.f, levels = c("Hardly any", "Only some", "A great deal"))
+gss_environ$conuscourt.f <- as.numeric(gss_environ$conuscourt.f)
+
+# For Confidence in People- transforming to ordinal 
+gss_environ$contrust.f <- gss_environ$contrust
+gss_environ$contrust.f[gss_environ$contrust.f == "Not applicable" | gss_environ$contrust.f == "No answer" | gss_environ$contrust.f == "Don't know"] <- NA
+table(gss_environ$contrust.f)
+gss_environ$contrust.f <- factor(gss_environ$contrust.f, levels = c("Can't be too careful", "DEPENDS", "CAN TRUST"))
+gss_environ$contrust.f <- as.numeric(gss_environ$contrust.f)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#------------- EXPORTING TRANSFORMED DATA INTO CSV----------------------
+#write.csv(gss_environ, "gss_environ.csv", row.names = FALSE)
+
+
+#------------------------FACTOR ANALYSIS ON CONFIDENCE LEVEL IN INSTITUTIONS------------------
+
+# Assessing if the varibles are appropriate for a Factor analysis
+df1_coninsti_matrix <- hetcor(gss_environ$conbank.f, 
+                              gss_environ$concomp.f,
+                              gss_environ$coneduc.f,
+                              gss_environ$conexecfed.f,
+                              gss_environ$conpress.f,
+                              gss_environ$conmed.f,
+                              gss_environ$contv.f,
+                              gss_environ$conlegis.f,
+                              gss_environ$consciencom.f,
+                              gss_environ$conuscourt.f,
+                              gss_environ$contrust.f,
+                              ml = TRUE)
+
+corrplot(df1_coninsti_matrix$correlations, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+print(df1_coninsti_matrix)
+
+# to make it easier to assess, I made a dataframe for just the confidence variables
+df1_coninsti <- gss_environ %>% 
+  select (
+    conbank.f, 
+    concomp.f, 
+    coneduc.f, 
+    conexecfed.f,
+    conpress.f,
+    conmed.f,
+    contv.f, 
+    conlegis.f,
+    consciencom.f, 
+    conuscourt.f, 
+    contrust.f, )
+
+KMO(df1_coninsti)
+cortest.bartlett(df1_coninsti)
+
+df1_coninsti_matrix <- hetcor(df1_coninsti)
+corrplot(df1_coninsti_matrix$correlations, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+
+# Factor analysis of confidence level in institutions 
+pcF1 <- principal(gss_environ[, c( "conbank.f", 
+                                   "concomp.f",
+                                   "coneduc.f",
+                                   "conexecfed.f",
+                                   "conpress.f",
+                                   "conmed.f",
+                                   "contv.f",
+                                   "conlegis.f",
+                                   "consciencom.f",
+                                   "conuscourt.f",
+                                   "contrust.f")],
+                  nfactors = 3, rotate = "varimax")
+
+print(pcF1$values)
+plot(pcF1$values, type = "b")
+pcF1
+
+gss_environ$fscores <- pcF1$scores
+
+# Scaling resulted factor scores to indicate level of confidence in Institutions
+median(gss_environ$fscores[,"RC1"], na.rm = TRUE)
+range(gss_environ$fscores[,"RC2"], na.rm = TRUE)
+range(gss_environ$fscores[,"RC3"], na.rm = TRUE)
+range(gss_environ$contrainsti)
+
+gss_environ$contrainsti <- scale(gss_environ$fscores[,"RC1"])
+gss_environ$contrainsti <- rescale(gss_environ$contrainsti)
+
+gss_environ$conauth <- scale(gss_environ$fscores[,"RC2"])
+gss_environ$conauth <- rescale(gss_environ$conauth)
+
+gss_environ$coninsys <- scale(gss_environ$fscores[,"RC3"])
+gss_environ$coninsys <- rescale(gss_environ$coninsys)
+
+# ---------- LOGISTIC REGRESSION analysis to answer question 1--------------
+# Data set to conduct Logistic Regression 
+logreg_en <- gss_environ %>% 
+  select (likeli_env, 
+          numchild,
+          idealnchild,
+          contrainsti,
+          conauth,
+          coninsys) %>% 
+  drop_na()
+
+
+model_q1 <- glm(likeli_env ~ numchild + idealnchild +  contrainsti + conauth + coninsys, family = binomial, data = logreg_en)
+summary(model_q1)
+
+# Test model significant
+exp(coef(model_q1))
+log.pseudo.r2(model_q1)
+hoslem.test(model_q1$y, model_q1$fitted.values)
+lrtest(model_q1)
+modelsig(model_q1)
+
+# Confusion Matrix and Accuracy of model 
+logreg_en$prob_final <- predict(model_q1, type = "response")
+quantile(logreg_en$prob_final)
+
+logreg_en$pred_final <- ifelse(logreg_en$prob_final > 0.5, "Support", "No")
+
+table(logreg_en$pred_final)
+
+logreg_en$support_value <- ifelse(logreg_en$likeli_env == 1, "Support", "No")
+table(logreg_en$support_value, logreg_en$pred_final) 
+
+accur_log1 <- 1 - round(mean(logreg_en$pred_final != logreg_en$support_value), 5)
+
+roc_final <- roc(logreg_en$likeli_env, logreg_en$prob_final)
+plot(roc_final, main = "ROC Curve") # main adds a title
+abline(a = 0, b = 1, lty = 2)
+legend(
+  "bottomright", 
+  legend = paste0("AUC = ", round(auc(roc_final), 2)),
+  bty = "n", 
+  cex = 0.8, 
+  col = "black"
+)
+
+# Saving final results
+stargazer(
+  model_q1,
+  type ="text",
+  title = "Logistic Regression Results", 
+  dep.var.labels = "Likelihood of supporting spending on environmental initiatives",
+  out= "support_enviro_Logresults_1")
+
+tab_model(
+  model_q1,
+  string.est = "Estimate",
+  string.ci = "Conf. Int.",
+  dv.labels = "Likelihood of supporting spending on environmental initiatives"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------- Basic TREE-BASED MODEL TO PREDICT LIKELIHOOD OF SPENDING SUPPORT-------------------
+# Create new dataframe with only interested variables to do our tree-based modeling
+df2_trees <- gss_environ %>% 
+  select (
+    likeli_env, 
+    age, 
+    race_poc, 
+    sex, 
+    highereduc, 
+    higherclass, 
+    famincome, 
+    income, 
+    numchild, 
+    idealnchild, 
+    libideal,
+    votedem, 
+    c_partnered, 
+    contrainsti, 
+    conauth, 
+    coninsys,
+  ) %>% 
+  drop_na()
+
+# Spilting the dataset into training and testing subsets
+set.seed(123)
+train_index <- createDataPartition(df2_trees$likeli_env, p = .8, list = FALSE, times = 1)
+train <- df2_trees[train_index,] # Creating our training set
+test  <- df2_trees[-train_index,] # Creating our testing set
+
+table(test$likeli_env)
+table(train$likeli_env)
+table(df2_trees$likeli_env)
+
+train$likeli_value <-  ifelse(train$likeli_env == 1, "Support", "Don't support")
+test$likeli_value <-  ifelse(test$likeli_env == 1, "Support", "Don't support")
+
+# Running our base logistic regression to get baseline predictions
+
+log_model_q2 <- glm(likeli_env ~ age + race_poc + sex + highereduc + higherclass + famincome + income + numchild + idealnchild + 
+                      libideal + votedem + c_partnered + contrainsti + conauth + coninsys, family = binomial, data = train)
+summary(log_model_q2)   
+
+exp(coef(log_model_q2))
+log.pseudo.r2(log_model_q2)
+hoslem.test(log_model_q2$y, log_model_q2$fitted.values)
+lrtest(log_model_q2)
+modelsig(log_model_q2)
+
+# Assess predictive power on test dataset.
+test$train_prob <- predict(log_model_q2, newdata = test, type = "response")
+quantile(test$train_prob)
+
+test$train_pred <- ifelse(test$train_prob > 0.5, "Support", "Don't support")
+
+table(test$train_pred)
+table(test$train_pred, test$likeli_value)
+accur_logtest <- 1 - round(mean(test$train_pred != test$likeli_value), 5)
+
+roc_lgs_reg <- roc(test$likeli_env, test$train_prob)
+auc_lgs_reg <- auc(roc_lgs_reg)
+plot(roc_lgs_reg, main = "ROC Curve")
+
+roc_test1 <- roc(test$likeli_env, test$train_prob)
+plot(roc_test1, main = "ROC Curve") # main adds a title
+abline(a = 0, b = 1, lty = 2)
+legend(
+  "bottomright", 
+  legend = paste0("AUC = ", round(auc(roc_test1), 2)),
+  bty = "n", 
+  cex = 0.8, 
+  col = "black"
+)
+
+
+stargazer(
+  log_model_q2 ,
+  type ="text",
+  title = "Baseline Logistic Regression Results", 
+  dep.var.labels = "Likelihood of supporting spending on environmental initiatives",
+  out= "support_enviro_Logresults_2")
+
+tab_model(
+  log_model_q2,
+  string.est = "Estimate",
+  string.ci = "Conf. Int.",
+  dv.labels = "Likelihood of supporting spending on environmental initiatives"
+)
+
+# Creating basic tree from training data (subset = 'train')
+tree_m_train = rpart(likeli_value ~ age + race_poc + sex + highereduc + higherclass + famincome + income + numchild + idealnchild + 
+                     libideal + votedem + c_partnered + contrainsti + conauth + coninsys, data = train, method = "class")
+summary(tree_m_train)
+
+fancyRpartPlot(tree_m_train)
+
+# Evaluate performance on new data ('test')
+test$tree_pred <- predict(tree_m_train, newdata = test, type = "class")
+confusionMatrix(as.factor(test$tree_pred), as.factor(test$likeli_value), positive = "Support")
+
+# Accuracy
+accur_tree1 <- 1 - round(mean(test$tree_pred != test$likeli_value), 5)
+
+# Plotting ROC curve
+roc_train_tree <- roc(test$likeli_env, predict(tree_m_train, newdata = test, type = "prob")[,2])
+plot(roc_train_tree, main = "ROC Curve") # main adds a title
+abline(a = 0, b = 1, lty = 2)
+legend(
+  "bottomright", 
+  legend = paste0("AUC = ", round(auc(roc_train_tree), 2)),
+  bty = "n", 
+  cex = 0.8, 
+  col = "black"
+)
+
+printcp(tree_m_train)
+
+# ------------------ RANDOM FOREST TO PREDICT LIKELIHOOD TO SUPPORT SPENDING -----------------
+
+#Set x and Y
+x <- train[,names(train) %in% c("", "age", "race_poc", "sex", "highereduc",  "higherclass",  "famincome", "income", "numchild", "idealnchild",
+                                "libideal", "votedem", "c_partnered", "contrainsti", "conauth", "coninsys")]
+y <- train$likeli_value
+
+#set fit control
+fitControl <- trainControl(## 5-fold CV
+  method = "repeatedcv",
+  number = 5,
+  ## repeated 5 times
+  repeats = 5)
+
+# Run forest model
+
+set.seed(1)
+rf_model <- caret::train(
+  x, y,
+  method = "rf",
+  trControl = fitControl,
+  tuneGrid = expand.grid(mtry = sqrt(15)) # The total number of predictors we put into our model
+)
+
+rf_model
+
+# Let's make predictions with the validation set of data.
+test$pred_rf <- predict(rf_model, newdata = test)
+confusionMatrix(as.factor(test$pred_rf), as.factor(test$likeli_value), positive = "Support")
+
+# Accuracy
+accur_rf <- 1 - round(mean(test$pred_rf != test$likeli_value), 5)
+
+# Plotting ROC curve
+roc_rf <- roc(test$likeli_env, predict(rf_model, newdata = test, type = "prob")[,2])
+auc_rf <- auc(roc_rf)
+plot(roc_rf, main = "ROC Curve")
+abline(a = 0, b = 1, lty = 2)
+legend(
+  "bottomright", 
+  legend = paste0("AUC = ", round(auc(roc_rf), 2)),
+  bty = "n", 
+  cex = 0.8, 
+  col = "black"
+)
+
+# Examine the importance of each variable.
+varImp(rf_model)
+varImp(tree_m_train)
+
+
+
